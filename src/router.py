@@ -6,8 +6,12 @@ import random
 import time
 from dataclasses import dataclass, field
 from threading import Lock
+from typing import TYPE_CHECKING
 
-from .types import GatewayError, RouteConfig, RoutingStrategy
+from .types import ChatCompletionRequest, GatewayError, RouteConfig, RoutingStrategy
+
+if TYPE_CHECKING:
+    from .providers.base import BaseProvider
 
 
 @dataclass
@@ -29,9 +33,14 @@ _CIRCUIT_COOLDOWN = 30.0          # seconds
 
 
 class Router:
-    """Select a provider for a given model using the configured strategy."""
+    """Select a provider for a given request using the configured strategy."""
 
-    def __init__(self, routes: list[RouteConfig]) -> None:
+    def __init__(
+        self,
+        providers: dict[str, BaseProvider],
+        routes: list[RouteConfig],
+    ) -> None:
+        self._providers = providers
         self._routes = routes
         self._provider_states: dict[str, ProviderState] = {}
         self._rr_counter = 0
@@ -39,18 +48,36 @@ class Router:
 
     # ── Public API ──────────────────────────────────────────────────
 
-    def route(self, model: str) -> str:
-        """Return the name of the selected provider."""
-        route_cfg = self._find_route(model)
+    async def route(self, req: ChatCompletionRequest) -> BaseProvider:
+        """Return the selected provider instance for the given request."""
+        route_cfg = self._find_route(req.model)
         if route_cfg is None:
-            raise GatewayError(404, f"no route configured for model {model}")
+            raise GatewayError(404, f"no route configured for model {req.model}")
 
-        available = self._available_providers(route_cfg.providers)
+        # Determine candidate providers:
+        #  - if route lists providers explicitly, use those
+        #  - otherwise auto-discover any configured provider that advertises the model
+        if route_cfg.providers:
+            candidates = [p for p in route_cfg.providers if p in self._providers]
+        else:
+            candidates = [
+                name for name, prov in self._providers.items()
+                if req.model in prov.models()
+            ]
+
+        if not candidates:
+            raise GatewayError(
+                404,
+                f"no provider configured for model {req.model}",
+            )
+
+        available = self._available_providers(candidates)
         if not available:
             raise GatewayError(503, "all providers are circuit-open", retryable=True)
 
         strategy = RoutingStrategy(route_cfg.strategy)
-        return self._select(strategy, available, route_cfg)
+        selected_name = self._select(strategy, available, route_cfg)
+        return self._providers[selected_name]
 
     def record_latency(self, provider: str, latency: float) -> None:
         with self._lock:
@@ -72,11 +99,30 @@ class Router:
     def provider_states(self) -> dict[str, ProviderState]:
         return dict(self._provider_states)
 
+    def get_provider_stats(self) -> dict[str, dict[str, float | int | bool]]:
+        """Return a JSON-serialisable snapshot of per-provider state."""
+        snapshot: dict[str, dict[str, float | int | bool]] = {}
+        for name in self._providers:
+            state = self._provider_states.get(name, ProviderState())
+            snapshot[name] = {
+                "avg_latency": round(state.avg_latency, 4),
+                "error_rate": round(state.error_rate, 4),
+                "request_count": state.request_count,
+                "error_count": state.error_count,
+                "circuit_open": state.circuit_open,
+            }
+        return snapshot
+
     # ── Route matching ──────────────────────────────────────────────
 
     def _find_route(self, model: str) -> RouteConfig | None:
+        # First pass: exact match on a route that names the model
         for r in self._routes:
-            if model in r.models or not r.models:
+            if model in r.models:
+                return r
+        # Second pass: wildcard / catch-all route
+        for r in self._routes:
+            if not r.models or "*" in r.models:
                 return r
         return None
 

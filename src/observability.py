@@ -40,10 +40,12 @@ class MetricsCollector:
         self.guardrail_violations_total = Counter(
             "gateway_guardrail_violations_total",
             "Total guardrail violations",
+            ["rule"],
         )
         self.pii_detections_total = Counter(
             "gateway_pii_detections_total",
             "Total PII detections",
+            ["type"],
         )
         self.active_requests = Gauge(
             "gateway_active_requests",
@@ -83,11 +85,11 @@ class MetricsCollector:
     def record_cache_miss(self) -> None:
         self.cache_misses_total.inc()
 
-    def record_guardrail_violation(self) -> None:
-        self.guardrail_violations_total.inc()
+    def record_guardrail_violation(self, rule: str = "unknown") -> None:
+        self.guardrail_violations_total.labels(rule=rule).inc()
 
-    def record_pii_detection(self) -> None:
-        self.pii_detections_total.inc()
+    def record_pii_detection(self, pii_type: str = "unknown") -> None:
+        self.pii_detections_total.labels(type=pii_type).inc()
 
     def increment_active(self) -> None:
         self.active_requests.inc()

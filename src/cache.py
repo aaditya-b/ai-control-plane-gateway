@@ -34,7 +34,14 @@ class CacheStats:
 class SemanticCache:
     """Thread-safe LRU cache with TTL expiration."""
 
-    def __init__(self, max_entries: int = 10_000, ttl: float = 300.0) -> None:
+    def __init__(
+        self,
+        *,
+        enabled: bool = True,
+        max_entries: int = 10_000,
+        ttl: float = 300.0,
+    ) -> None:
+        self._enabled = enabled
         self._max_entries = max_entries
         self._ttl = ttl
         self._cache: OrderedDict[str, CacheEntry] = OrderedDict()
@@ -102,9 +109,16 @@ class SemanticCache:
         async with self._lock:
             self._cache.clear()
 
-    @property
-    def stats(self) -> CacheStats:
-        return self._stats
+    def stats(self) -> dict[str, float | int]:
+        """Return a JSON-serialisable snapshot of cache stats."""
+        return {
+            "hits": self._stats.hits,
+            "misses": self._stats.misses,
+            "hit_rate": round(self._stats.hit_rate, 4),
+            "size": len(self._cache),
+            "max_entries": self._max_entries,
+            "ttl": self._ttl,
+        }
 
     @property
     def size(self) -> int:

@@ -33,6 +33,17 @@ from .providers.google import GoogleProvider
 from .providers.azure import AzureProvider
 from .providers.bedrock import BedrockProvider
 from .providers.mistral import MistralProvider
+from .providers.groq import GroqProvider
+from .providers.together import TogetherProvider
+from .providers.deepseek import DeepSeekProvider
+from .providers.xai import XAIProvider
+from .providers.perplexity import PerplexityProvider
+from .providers.fireworks import FireworksProvider
+from .providers.ollama import OllamaProvider
+from .providers.cohere import CohereProvider
+from .providers.ai21 import AI21Provider
+from .providers.huggingface import HuggingFaceProvider
+from .providers.replicate import ReplicateProvider
 from .proxy import Proxy
 from .router import Router
 
@@ -66,6 +77,21 @@ def create_app(config_path: str | None = None) -> FastAPI:
         "azure": AzureProvider,
         "bedrock": BedrockProvider,
         "mistral": MistralProvider,
+        "groq": GroqProvider,
+        "together": TogetherProvider,
+        "togetherai": TogetherProvider,
+        "deepseek": DeepSeekProvider,
+        "xai": XAIProvider,
+        "grok": XAIProvider,
+        "perplexity": PerplexityProvider,
+        "pplx": PerplexityProvider,
+        "fireworks": FireworksProvider,
+        "ollama": OllamaProvider,
+        "cohere": CohereProvider,
+        "ai21": AI21Provider,
+        "huggingface": HuggingFaceProvider,
+        "hf": HuggingFaceProvider,
+        "replicate": ReplicateProvider,
     }
     for pc in cfg.providers:
         cls = _PROVIDER_MAP.get(pc.name)
