@@ -1,0 +1,162 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# AI Control Plane Gateway — CI/CD Deploy Pipeline
+#
+# Triggers:
+#   • Push a git tag like v1.2.3  →  build image, push to GHCR, deploy to prod
+#   • Push to main branch         →  build + test only (no deploy)
+#
+# Required GitHub Secrets (Settings → Secrets → Actions):
+#   GHCR_TOKEN          — GitHub personal access token with write:packages scope
+#   PROD_SSH_HOST       — Your server's IP or hostname
+#   PROD_SSH_USER       — SSH user (e.g. ubuntu, deploy)
+#   PROD_SSH_KEY        — Private SSH key (contents of ~/.ssh/id_rsa)
+# ──────────────────────────────────────────────────────────────────────────────
+
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*.*.*"
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/ai-control-plane-gateway
+
+jobs:
+  # ── Run tests ────────────────────────────────────────────────────────────────
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check src/ tests/
+
+      - name: Type check
+        run: mypy src/ --ignore-missing-imports
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
+
+  # ── Build & push Docker image ─────────────────────────────────────────────
+  build:
+    name: Build Docker image
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+      image_digest: ${{ steps.push.outputs.digest }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+
+  # ── Deploy to production server ───────────────────────────────────────────
+  deploy:
+    name: Deploy to production
+    runs-on: ubuntu-latest
+    needs: build
+    # Only deploy on version tags (v1.2.3), not on plain main pushes
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_SSH_HOST }}
+          username: ${{ secrets.PROD_SSH_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/ai-gateway
+
+            # Pull the new image
+            echo "${{ secrets.GHCR_TOKEN }}" | \
+              docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            export IMAGE_TAG=${{ github.ref_name }}
+            export DOCKER_IMAGE=ghcr.io/${{ env.IMAGE_NAME }}
+
+            # Pull new image before stopping old one (zero-downtime)
+            docker compose -f docker-compose.prod.yml pull gateway
+
+            # Rolling restart: gateway only (nginx/prometheus stay up)
+            docker compose -f docker-compose.prod.yml up -d --no-deps gateway
+
+            # Verify health
+            sleep 10
+            curl -sf http://localhost:8080/health || \
+              (echo "Health check failed — rolling back" && \
+               docker compose -f docker-compose.prod.yml rollout --previous gateway && \
+               exit 1)
+
+            echo "Deployment successful: $IMAGE_TAG"
+
+      - name: Notify on success
+        if: success()
+        run: |
+          echo "✅ Deployed ${{ github.ref_name }} to production"
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Deployment of ${{ github.ref_name }} failed"

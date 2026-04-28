@@ -1,0 +1,56 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# AI Control Plane Gateway — .gitignore
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+env/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Environment / secrets — NEVER commit these
+.env
+.env.production
+.env.local
+.env.*.local
+
+# SSL certificates (managed by certbot)
+certbot-certs/
+certbot-webroot/
+
+# Runtime data
+audit_logs/
+/data/
+nginx-logs/
+*.log
+
+# Presentation and document files (local use only)
+*.pptx
+*.docx
+*.ppt
+*.doc
+
+# PPTX build tooling
+pptx_build/
+node_modules/
+
+# macOS
+.DS_Store
+.AppleDouble
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude agent session data
+.claude/

@@ -1,0 +1,287 @@
+# ──────────────────────────────────────────────────────────────────────
+# AI Control Plane Gateway – Example Configuration
+# ──────────────────────────────────────────────────────────────────────
+
+server:
+  port: 8080
+  host: "0.0.0.0"
+  workers: 1
+  api_keys: []  # Empty = no auth required; add keys to enforce
+
+# ── LLM Providers ───────────────────────────────────────────────────
+providers:
+  - name: openai
+    api_key: "${OPENAI_API_KEY}"
+    base_url: "https://api.openai.com/v1"
+    models:
+      - gpt-4o
+      - gpt-4o-mini
+      - gpt-4-turbo
+      - gpt-3.5-turbo
+    timeout: 30.0
+    max_retries: 3
+
+  - name: anthropic
+    api_key: "${ANTHROPIC_API_KEY}"
+    base_url: "https://api.anthropic.com"
+    models:
+      - claude-3-opus
+      - claude-3-5-sonnet
+      - claude-3-sonnet
+      - claude-3-haiku
+    timeout: 60.0
+    max_retries: 3
+
+  - name: google
+    api_key: "${GOOGLE_API_KEY}"
+    base_url: "https://generativelanguage.googleapis.com"
+    models:
+      - gemini-1.5-pro
+      - gemini-1.5-flash
+    timeout: 60.0
+    max_retries: 3
+
+  - name: mistral
+    api_key: "${MISTRAL_API_KEY}"
+    base_url: "https://api.mistral.ai/v1"
+    models:
+      - mistral-large-latest
+      - mistral-medium-latest
+      - mistral-small-latest
+    timeout: 30.0
+    max_retries: 3
+
+  - name: groq
+    api_key: "${GROQ_API_KEY}"
+    base_url: "https://api.groq.com/openai/v1"
+    models:
+      - llama-3.3-70b-versatile
+      - llama-3.1-70b-versatile
+      - llama-3.1-8b-instant
+      - mixtral-8x7b-32768
+      - gemma2-9b-it
+    timeout: 30.0
+    max_retries: 3
+
+  - name: together
+    api_key: "${TOGETHER_API_KEY}"
+    base_url: "https://api.together.xyz/v1"
+    models:
+      - meta-llama/Llama-3.3-70B-Instruct-Turbo
+      - meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo
+      - deepseek-ai/DeepSeek-V3
+    timeout: 60.0
+    max_retries: 3
+
+  - name: deepseek
+    api_key: "${DEEPSEEK_API_KEY}"
+    base_url: "https://api.deepseek.com/v1"
+    models:
+      - deepseek-chat
+      - deepseek-reasoner
+    timeout: 60.0
+    max_retries: 3
+
+  - name: xai
+    api_key: "${XAI_API_KEY}"
+    base_url: "https://api.x.ai/v1"
+    models:
+      - grok-2-latest
+      - grok-2-1212
+      - grok-beta
+    timeout: 60.0
+    max_retries: 3
+
+  - name: perplexity
+    api_key: "${PERPLEXITY_API_KEY}"
+    base_url: "https://api.perplexity.ai"
+    models:
+      - sonar
+      - sonar-pro
+      - sonar-reasoning
+      - sonar-reasoning-pro
+    timeout: 60.0
+    max_retries: 3
+
+  - name: fireworks
+    api_key: "${FIREWORKS_API_KEY}"
+    base_url: "https://api.fireworks.ai/inference/v1"
+    models:
+      - accounts/fireworks/models/llama-v3p3-70b-instruct
+      - accounts/fireworks/models/mixtral-8x7b-instruct
+    timeout: 60.0
+    max_retries: 3
+
+  - name: cohere
+    api_key: "${COHERE_API_KEY}"
+    base_url: "https://api.cohere.com"
+    models:
+      - command-r-plus
+      - command-r
+      - command-r-plus-08-2024
+      - command-r-08-2024
+    timeout: 30.0
+    max_retries: 3
+
+  - name: ai21
+    api_key: "${AI21_API_KEY}"
+    base_url: "https://api.ai21.com/studio/v1"
+    models:
+      - jamba-1.5-large
+      - jamba-1.5-mini
+    timeout: 30.0
+    max_retries: 3
+
+  - name: huggingface
+    api_key: "${HF_API_KEY}"
+    base_url: "https://api-inference.huggingface.co"
+    models:
+      - meta-llama/Meta-Llama-3.1-70B-Instruct
+      - mistralai/Mistral-7B-Instruct-v0.3
+      - Qwen/Qwen2.5-72B-Instruct
+    timeout: 60.0
+    max_retries: 3
+
+  - name: replicate
+    api_key: "${REPLICATE_API_TOKEN}"
+    base_url: "https://api.replicate.com"
+    models:
+      - meta/meta-llama-3.1-70b-instruct
+      - mistralai/mixtral-8x7b-instruct-v0.1
+    timeout: 120.0
+    max_retries: 3
+
+  - name: ollama
+    api_key: "ollama"
+    base_url: "http://localhost:11434/v1"
+    models:
+      - llama3.3
+      - mistral
+      - qwen2.5
+      - deepseek-r1
+    timeout: 120.0
+    max_retries: 1
+
+# ── Routing ─────────────────────────────────────────────────────────
+routes:
+  - name: default
+    strategy: round-robin          # round-robin | weighted | least-latency | cost-optimized | quality | fallback
+    models: ["*"]
+    providers: []                  # Empty = auto-discover by model
+
+  - name: cost-sensitive
+    strategy: cost-optimized
+    models:
+      - gpt-4o-mini
+      - gpt-3.5-turbo
+      - claude-3-haiku
+      - gemini-1.5-flash
+      - mistral-small-latest
+    cost_per_token:
+      openai: 0.00015
+      anthropic: 0.00025
+      google: 0.00035
+      mistral: 0.001
+
+  - name: premium
+    strategy: quality
+    models:
+      - gpt-4o
+      - claude-3-opus
+      - gemini-1.5-pro
+    quality_scores:
+      openai: 0.92
+      anthropic: 0.95
+      google: 0.88
+
+# ── Semantic Cache ──────────────────────────────────────────────────
+cache:
+  enabled: true
+  ttl: 300                         # seconds
+  max_entries: 10000
+  similarity_threshold: 0.95
+
+# ── Prompt Compression ──────────────────────────────────────────────
+compression:
+  enabled: true
+  target_ratio: 0.3
+  min_tokens: 100
+  max_history_messages: 20
+  remove_duplicates: true
+  trim_whitespace: true
+
+# ── Observability ───────────────────────────────────────────────────
+observability:
+  metrics_enabled: true
+  log_level: info
+
+# ── Governance ──────────────────────────────────────────────────────
+governance:
+  guardrails_enabled: true
+  pii_redaction_enabled: true
+  audit_enabled: true
+  policy_enabled: true
+  audit_storage_path: "./audit_logs"
+  blocked_patterns: []
+  blocked_topics: []
+  policies:
+    - name: model-allowlist
+      description: "Only allow approved models"
+      action: deny
+      priority: 100
+      rules:
+        - field: model
+          operator: not_in
+          value:
+            - gpt-4o
+            - gpt-4o-mini
+            - gpt-4-turbo
+            - gpt-3.5-turbo
+            - claude-3-opus
+            - claude-3-5-sonnet
+            - claude-3-sonnet
+            - claude-3-haiku
+            - gemini-1.5-pro
+            - gemini-1.5-flash
+            - mistral-large-latest
+            - mistral-medium-latest
+            - mistral-small-latest
+
+    - name: token-limit
+      description: "Cap max_tokens at 8192"
+      action: deny
+      priority: 90
+      rules:
+        - field: max_tokens
+          operator: gt
+          value: 8192
+
+    - name: off-hours-warning
+      description: "Warn about off-hours usage"
+      action: warn
+      priority: 10
+      rules:
+        - field: hour
+          operator: gt
+          value: 22
+
+# ── Budget Management ───────────────────────────────────────────────
+budget:
+  enabled: true
+  default_daily_limit: 100.0       # USD
+  default_monthly_limit: 2000.0    # USD
+  team_budgets: {}
+  user_budgets: {}
+
+# ── A/B Testing ─────────────────────────────────────────────────────
+ab_testing:
+  enabled: false
+  experiments:
+    - name: gpt4o-vs-claude
+      models:
+        - gpt-4o
+        - claude-3-5-sonnet
+      traffic_split:
+        - 0.5
+        - 0.5
+      enabled: true

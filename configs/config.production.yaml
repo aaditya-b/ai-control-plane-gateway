@@ -1,0 +1,358 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# AI Control Plane Gateway — PRODUCTION Configuration
+# API keys are injected via environment variables — never hardcode secrets here.
+# ──────────────────────────────────────────────────────────────────────────────
+
+server:
+  port: 8080
+  host: "0.0.0.0"
+  workers: 4                           # scale to 2x CPU cores; override via env
+
+  # ── Authentication mode ─────────────────────────────────────────────────
+  # "api_key"  — Bearer token must match a key in api_keys (default, simplest)
+  # "entra_id" — Bearer token must be a valid Microsoft Entra ID JWT
+  # "any"      — accept either (recommended during migration)
+  auth_mode: "${GATEWAY_AUTH_MODE:-api_key}"
+
+  # Static API keys — used when auth_mode is "api_key" or "any"
+  api_keys:
+    - "${GATEWAY_API_KEY_1}"
+    - "${GATEWAY_API_KEY_2}"           # optional second key (e.g. for health-check user)
+
+  # ── Microsoft Entra ID — used when auth_mode is "entra_id" or "any" ────
+  entra_id:
+    # Azure AD tenant ID — find in Azure Portal → Entra ID → Overview
+    tenant_id: "${ENTRA_TENANT_ID}"
+    # App registration client ID — the audience your clients request tokens for
+    client_id: "${ENTRA_CLIENT_ID}"
+    # (Optional) Only tokens containing one of these App Roles are accepted.
+    # Define roles in: App registrations → App roles → Add app role
+    required_roles: []
+    # (Optional) Only tokens containing one of these AAD group OIDs are accepted.
+    required_groups: []
+    # (Optional) For multi-tenant apps: restrict to specific tenant IDs.
+    allowed_tenants: []
+
+# ── LLM Providers ─────────────────────────────────────────────────────────────
+# Only providers with a non-empty API key will be activated at startup.
+providers:
+  - name: openai
+    api_key: "${OPENAI_API_KEY}"
+    base_url: "https://api.openai.com/v1"
+    models:
+      - gpt-4o
+      - gpt-4o-mini
+      - gpt-4-turbo
+      - gpt-3.5-turbo
+    timeout: 60.0
+    max_retries: 3
+
+  - name: anthropic
+    api_key: "${ANTHROPIC_API_KEY}"
+    base_url: "https://api.anthropic.com"
+    models:
+      - claude-3-opus
+      - claude-3-5-sonnet
+      - claude-3-sonnet
+      - claude-3-haiku
+    timeout: 90.0
+    max_retries: 3
+
+  - name: google
+    api_key: "${GOOGLE_API_KEY}"
+    base_url: "https://generativelanguage.googleapis.com"
+    models:
+      - gemini-1.5-pro
+      - gemini-1.5-flash
+    timeout: 60.0
+    max_retries: 3
+
+  - name: mistral
+    api_key: "${MISTRAL_API_KEY}"
+    base_url: "https://api.mistral.ai/v1"
+    models:
+      - mistral-large-latest
+      - mistral-medium-latest
+      - mistral-small-latest
+    timeout: 30.0
+    max_retries: 3
+
+  - name: groq
+    api_key: "${GROQ_API_KEY}"
+    base_url: "https://api.groq.com/openai/v1"
+    models:
+      - llama-3.3-70b-versatile
+      - llama-3.1-8b-instant
+      - mixtral-8x7b-32768
+    timeout: 30.0
+    max_retries: 3
+
+  - name: together
+    api_key: "${TOGETHER_API_KEY}"
+    base_url: "https://api.together.xyz/v1"
+    models:
+      - meta-llama/Llama-3.3-70B-Instruct-Turbo
+      - deepseek-ai/DeepSeek-V3
+    timeout: 60.0
+    max_retries: 3
+
+  - name: deepseek
+    api_key: "${DEEPSEEK_API_KEY}"
+    base_url: "https://api.deepseek.com/v1"
+    models:
+      - deepseek-chat
+      - deepseek-reasoner
+    timeout: 60.0
+    max_retries: 3
+
+  - name: xai
+    api_key: "${XAI_API_KEY}"
+    base_url: "https://api.x.ai/v1"
+    models:
+      - grok-2-latest
+    timeout: 60.0
+    max_retries: 3
+
+  - name: perplexity
+    api_key: "${PERPLEXITY_API_KEY}"
+    base_url: "https://api.perplexity.ai"
+    models:
+      - sonar-pro
+      - sonar-reasoning-pro
+    timeout: 60.0
+    max_retries: 3
+
+  - name: fireworks
+    api_key: "${FIREWORKS_API_KEY}"
+    base_url: "https://api.fireworks.ai/inference/v1"
+    models:
+      - accounts/fireworks/models/llama-v3p3-70b-instruct
+    timeout: 60.0
+    max_retries: 3
+
+  - name: cohere
+    api_key: "${COHERE_API_KEY}"
+    base_url: "https://api.cohere.com"
+    models:
+      - command-r-plus
+      - command-r
+    timeout: 30.0
+    max_retries: 3
+
+  - name: ai21
+    api_key: "${AI21_API_KEY}"
+    base_url: "https://api.ai21.com/studio/v1"
+    models:
+      - jamba-1.5-large
+    timeout: 30.0
+    max_retries: 3
+
+  - name: huggingface
+    api_key: "${HF_API_KEY}"
+    base_url: "https://api-inference.huggingface.co"
+    models:
+      - meta-llama/Meta-Llama-3.1-70B-Instruct
+    timeout: 60.0
+    max_retries: 3
+
+  - name: replicate
+    api_key: "${REPLICATE_API_TOKEN}"
+    base_url: "https://api.replicate.com"
+    models:
+      - meta/meta-llama-3.1-70b-instruct
+    timeout: 120.0
+    max_retries: 3
+
+# ── Routing ───────────────────────────────────────────────────────────────────
+routes:
+  - name: default
+    strategy: fallback              # try providers in order; fail over automatically
+    models: ["*"]
+    providers: []
+
+  - name: cost-optimized
+    strategy: cost-optimized
+    models:
+      - gpt-4o-mini
+      - gpt-3.5-turbo
+      - claude-3-haiku
+      - gemini-1.5-flash
+      - mistral-small-latest
+    cost_per_token:
+      openai: 0.00015
+      anthropic: 0.00025
+      google: 0.000075
+      mistral: 0.0002
+
+  - name: premium
+    strategy: quality
+    models:
+      - gpt-4o
+      - claude-3-opus
+      - gemini-1.5-pro
+    quality_scores:
+      openai: 0.92
+      anthropic: 0.95
+      google: 0.88
+
+# ── Semantic Cache ─────────────────────────────────────────────────────────────
+cache:
+  enabled: true
+  ttl: 600                          # 10 min in production (longer = more savings)
+  max_entries: 50000
+  similarity_threshold: 0.95
+
+  # ── Security controls (do not disable in healthcare deployments) ──────────
+  # Skip cache for requests that contained PHI — patient-specific queries must
+  # never be served from cache to a different user/patient context.
+  skip_on_phi: true
+
+  # Scope cache keys by team_id — prevents cross-tenant cache reads.
+  # Hospital A and Hospital B cannot read each other's cached responses.
+  tenant_isolation: true
+
+# ── Prompt Compression ────────────────────────────────────────────────────────
+compression:
+  enabled: true
+  target_ratio: 0.3
+  min_tokens: 100
+  max_history_messages: 20
+  remove_duplicates: true
+  trim_whitespace: true
+
+# ── Observability ─────────────────────────────────────────────────────────────
+observability:
+  metrics_enabled: true
+  tracing_enabled: false            # enable when OTLP endpoint is configured
+  log_level: info
+
+# ── Governance ────────────────────────────────────────────────────────────────
+governance:
+  guardrails_enabled: true
+  pii_redaction_enabled: true
+  pii_healthcare_entities: true     # full HIPAA PHI mode
+  audit_enabled: true
+  policy_enabled: true
+  audit_storage_path: "/data/audit_logs"
+  healthcare_mode: true             # clinical hallucination scanning
+  blocked_patterns: []
+  blocked_topics: []
+
+  # Custom PII patterns (list of [name, regex, replacement])
+  pii_custom_patterns: []
+
+  policies:
+    - name: model-allowlist
+      description: "Only allow approved models through the gateway"
+      action: deny
+      priority: 100
+      rules:
+        - field: model
+          operator: not_in
+          value:
+            - gpt-4o
+            - gpt-4o-mini
+            - gpt-4-turbo
+            - gpt-3.5-turbo
+            - claude-3-opus
+            - claude-3-5-sonnet
+            - claude-3-sonnet
+            - claude-3-haiku
+            - gemini-1.5-pro
+            - gemini-1.5-flash
+            - mistral-large-latest
+            - mistral-medium-latest
+            - mistral-small-latest
+            - llama-3.3-70b-versatile
+            - deepseek-chat
+            - grok-2-latest
+            - sonar-pro
+            - command-r-plus
+
+    - name: token-limit
+      description: "Hard cap on max_tokens to prevent runaway cost"
+      action: deny
+      priority: 90
+      rules:
+        - field: max_tokens
+          operator: gt
+          value: 8192
+
+# ── A/B Testing ───────────────────────────────────────────────────────────────
+ab_testing:
+  enabled: false
+  experiments: []
+
+# ── Alerting ──────────────────────────────────────────────────────────────────
+alerting:
+  enabled: true
+
+  # Webhook — format is auto-detected from the URL:
+  #   hooks.slack.com          → Slack Block Kit
+  #   webhook.office.com       → Microsoft Teams MessageCard
+  #   events.pagerduty.com     → PagerDuty Events API v2
+  #   anything else            → Generic JSON
+  # Override detection by setting webhook_type explicitly:
+  #   "slack" | "teams" | "pagerduty" | "generic" | "auto"
+  webhook_url: "${ALERT_WEBHOOK_URL}"
+  webhook_type: "auto"
+
+  # PagerDuty only: 32-char integration routing key from your PagerDuty service.
+  # Leave empty if using the full events.pagerduty.com URL in webhook_url.
+  pagerduty_routing_key: "${PAGERDUTY_ROUTING_KEY}"
+
+  # Email recipients (leave empty to disable email delivery)
+  email_recipients: []
+
+  # ── Anomaly detection ────────────────────────────────────────────────────
+  # Alert when a metric exceeds this multiple of its rolling EMA baseline.
+  # 2.0 = alert when request rate or spend is 2x the recent rolling average.
+  spike_multiplier: 2.0
+
+  # ── Absolute thresholds (0 = disabled) ──────────────────────────────────
+  thresholds:
+    requests_per_minute: 0            # hard cap on req/min (0 = disabled)
+    policy_violations_per_minute: 5   # adversarial activity signal
+    token_spend_per_hour: 0.0         # hard $/hr cap (0 = disabled)
+    error_rate: 0.05                  # alert if >5% of requests error
+
+  # How often the anomaly loop evaluates rolling counters (seconds)
+  evaluation_interval: 60
+
+# ── Budget Management ─────────────────────────────────────────────────────────
+budget:
+  enabled: true
+  default_daily_limit: 500.0          # USD per user — increase as revenue grows
+  default_monthly_limit: 10000.0      # USD
+  team_budgets: {}
+  user_budgets: {}
+  # Quota warning thresholds — fire an alert at each fraction of the limit.
+  # e.g. [0.8, 0.9] fires at 80% and 90% of daily/monthly budget.
+  # Resets automatically when the daily/monthly period rolls over.
+  alert_thresholds:
+    - 0.8    # ⚠️  Warning at 80% of budget
+    - 0.9    # ⚠️  Warning at 90% of budget
+
+# ── Agent Session Governance ──────────────────────────────────────────────────
+# Governs multi-hop agentic runs (chains, sub-agents, tool loops).
+# Clients identify a run by sending X-Agent-Run-Id: <uuid> on every call.
+agent_sessions:
+  enabled: true
+  # Hard limit: sub-agent nesting depth (orchestrator = 0)
+  max_depth: 10
+  # Circuit breaker: total LLM calls within one agent run
+  max_calls_per_session: 200
+  # Per-run cost ceiling in USD
+  max_cost_per_session_usd: 50.0
+  # Evict idle sessions after this many seconds
+  session_ttl_seconds: 3600
+  # Detect loops via message fingerprinting
+  loop_detection_enabled: true
+  # Max parallel tool_calls allowed in a single model response
+  max_tool_fan_out: 10
+
+# ── MCP (Model Context Protocol) ──────────────────────────────────────────────
+mcp:
+  enabled: false                        # enable when registering MCP tool servers
+  registry_enforcement: true
+  servers: []

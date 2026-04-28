@@ -1,0 +1,172 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# AI Control Plane Gateway — Production Docker Compose
+#
+# Services:
+#   nginx     — SSL-terminating reverse proxy (ports 80 + 443)
+#   gateway   — AI Control Plane (port 8080, internal only)
+#   prometheus — Metrics scraper (internal only)
+#   grafana   — Dashboard UI at /grafana/ (internal, proxied by nginx)
+#
+# Usage:
+#   cp .env.production.example .env.production
+#   # fill in your secrets in .env.production
+#   docker compose -f docker-compose.prod.yml up -d
+# ──────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Nginx reverse proxy ────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - certbot-webroot:/var/www/certbot:ro
+      - certbot-certs:/etc/letsencrypt:ro
+      - nginx-logs:/var/log/nginx
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks:
+      - frontend
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ── AI Control Plane Gateway ───────────────────────────────────────────────
+  gateway:
+    image: ${DOCKER_IMAGE:-ai-control-plane-gateway}:${IMAGE_TAG:-latest}
+    build:
+      context: ./gateway-python
+      dockerfile: Dockerfile
+      target: runtime
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      GATEWAY_CONFIG: configs/config.production.yaml
+      GATEWAY_ENV: production
+    volumes:
+      # Audit logs persist outside the container
+      - audit-logs:/data/audit_logs
+      # Mount production config (read-only)
+      - ./gateway-python/configs:/app/configs:ro
+    expose:
+      - "8080"
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health').read()"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+    # Sensible resource limits (tune to your server size)
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ── Prometheus metrics ─────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.53.1
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    expose:
+      - "9090"
+    networks:
+      - backend
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  # ── Grafana dashboard ──────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.3.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+    expose:
+      - "3000"
+    depends_on:
+      - prometheus
+    networks:
+      - backend
+      - frontend
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  # ── Certbot (auto-renews Let's Encrypt SSL) ────────────────────────────────
+  certbot:
+    image: certbot/certbot:latest
+    restart: unless-stopped
+    volumes:
+      - certbot-webroot:/var/www/certbot
+      - certbot-certs:/etc/letsencrypt
+    # Renews every 12 hours; Let's Encrypt only actually renews when <30 days remain
+    entrypoint: >
+      /bin/sh -c "trap exit TERM;
+      while :; do
+        certbot renew --webroot -w /var/www/certbot --quiet;
+        sleep 12h & wait $${!};
+      done"
+
+# ── Named volumes ──────────────────────────────────────────────────────────────
+volumes:
+  audit-logs:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+  certbot-webroot:
+    driver: local
+  certbot-certs:
+    driver: local
+  nginx-logs:
+    driver: local
+
+# ── Networks ───────────────────────────────────────────────────────────────────
+networks:
+  frontend:        # nginx ↔ gateway, nginx ↔ grafana
+  backend:         # gateway ↔ prometheus ↔ grafana (isolated from internet)
+    internal: true
